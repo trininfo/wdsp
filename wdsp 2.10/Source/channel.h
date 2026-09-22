@@ -50,6 +50,7 @@ struct _ch
 	double tslewdown;
 	int bfo;					// 'block_for_output', block fexchange until output is available
 	volatile long flushflag;
+	HANDLE hThreadExit;			// set by wdspmain() as it returns; CloseChannel() waits for it
 	struct	//io buffers
 	{
 		IOB pc, pd, pe, pf;		// copies for console calls, dsp, exchange, and flush thread

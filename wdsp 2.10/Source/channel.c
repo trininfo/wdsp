@@ -60,6 +60,7 @@ void pre_main_build (int channel)
 void post_main_build (int channel)
 {
 	InterlockedBitTestAndSet (&ch[channel].run, 0);
+	ch[channel].hThreadExit = CreateEvent (NULL, TRUE, FALSE, NULL);
 	start_thread (channel);
 	if (ch[channel].state == 1)
 	 	InterlockedBitTestAndSet (&ch[channel].exchange, 0);
@@ -107,7 +108,12 @@ void pre_main_destroy (int channel)
 	InterlockedBitTestAndReset (&ch[channel].run, 0);
 	InterlockedBitTestAndSet (&ch[channel].iob.pc->exec_bypass, 0);
 	ReleaseSemaphore (a->Sem_BuffReady, 1, 0);
-	Sleep (25);
+	// Wait for the DSP thread to leave: it may be in the middle of a block (with bfo set,
+	// fexchange() returns as soon as the thread has swapped buffers), and a fixed sleep
+	// is not always long enough -- a block with NNR Premium running can take longer.
+	WaitForSingleObject (ch[channel].hThreadExit, INFINITE);
+	CloseHandle (ch[channel].hThreadExit);
+	ch[channel].hThreadExit = 0;
 }
 
 void post_main_destroy (int channel)
