@@ -59,6 +59,7 @@ struct HBRESdata
     uint32_t bsize[10];
     complex_t* buff[10];
     hbres rsmps[10];
+    RESAMPLE fallback;      // general resampler for rate pairs with no half-band design
 };
 
 typedef struct HBRESdata* HBResampler;

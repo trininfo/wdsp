@@ -165,7 +165,9 @@ static int xhbres(HBRES r)
 
 void xHBResampler(HBResampler tData)
 {
-    if (tData->run)
+    if (tData->fallback)
+        xresample(tData->fallback);
+    else if (tData->run)
     {
         for (uint32_t i = 0; i < tData->nStages; i++)
         {
@@ -342,6 +344,13 @@ static void calc_HBResampler(HBResampler tData)
         tData->nBuffs = 0;
         break;
     }
+    // A pair with no half-band design: resample with the general resampler rather than
+    // copying insize samples through, which is wrong and, above a ratio of 2, overruns
+    // the output buffer (RXA's midbuff holds 2 * dsp_size).
+    tData->fallback = 0;
+    if (!tData->run && tData->inrate != tData->outrate)
+        tData->fallback = create_resample (1, (int)tData->insize, (double*)tData->in, (double*)tData->out,
+            (int)tData->inrate, (int)tData->outrate, 0.0, 0, 1.0);
     const int WINTYPE = 2;
     uint32_t bdiv = 2;
     for (uint32_t i = 0; i < tData->nBuffs; i++)
@@ -409,6 +418,11 @@ static void decalc_HBResampler(HBResampler tData)
     {
         _aligned_free(tData->buff[i]);
     }
+    if (tData->fallback)
+    {
+        destroy_resample(tData->fallback);
+        tData->fallback = 0;
+    }
 }
 
 void destroy_HBResampler(HBResampler tData)
@@ -419,6 +433,7 @@ void destroy_HBResampler(HBResampler tData)
 
 void flush_HBResampler(HBResampler tData)
 {
+    if (tData->fallback) flush_resample(tData->fallback);
     for (uint32_t i = 0; i < tData->nStages; i++)
     {
         memset(tData->rsmps[i].ring, 0, tData->rsmps[i].N * sizeof(complex_t));
