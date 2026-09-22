@@ -61,7 +61,7 @@ EQIMP create_eqimp(int nfreqs, int nc, int wintype, int max_freqs)
 	a->gp = (double*)malloc0((a->max_freqs + 2) * sizeof(double));
 	a->A  = (double*)malloc0((a->nc / 2 + 1) * sizeof(double));
 	a->sary = (double*)malloc0(2 * a->max_freqs * sizeof(double));
-	a->pnurbs = create_nurbs(nfreqs - 1, 3, 0, 0, 1024,
+	a->pnurbs = create_nurbs(nfreqs - 1, 0, 0, 0, 1024,	// degree 0: the EQ starts linear (eqp.deg = 0)
 		EQ_MAXIMUM_CONTROL_POINTS,
 		EQ_MAXIMUM_DEGREE,
 		EQ_MAXIMUM_U_VALUES,
