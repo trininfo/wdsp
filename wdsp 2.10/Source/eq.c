@@ -202,7 +202,7 @@ void eq_impulse (EQIMP a, int N, int nfreqs, double* F, double* G,
 				while (--k >= 0)
 				{
 					f = (double)k / (double)mid;
-					lowmag *= (f * f * f * f) / flow4;
+					lowmag = A[low] * (f * f * f * f) / flow4;
 					if (lowmag < 1.0e-100) lowmag = 1.0e-100;
 					A[k] = lowmag;
 				}
@@ -210,7 +210,7 @@ void eq_impulse (EQIMP a, int N, int nfreqs, double* F, double* G,
 				while (++k <= mid)
 				{
 					f = (double)k / (double)mid;
-					highmag *= fhigh4 / (f * f * f * f);
+					highmag = A[high] * fhigh4 / (f * f * f * f);
 					if (highmag < 1.0e-100) highmag = 1.0e-100;
 					A[k] = highmag;
 				}
@@ -225,7 +225,7 @@ void eq_impulse (EQIMP a, int N, int nfreqs, double* F, double* G,
 				while (--k >= 0)
 				{
 					f = (double)k / (double)mid;
-					lowmag *= (f * f * f * f) / flow4;
+					lowmag = A[low] * (f * f * f * f) / flow4;
 					if (lowmag < 1.0e-100) lowmag = 1.0e-100;
 					A[k] = lowmag;
 				}
@@ -233,7 +233,7 @@ void eq_impulse (EQIMP a, int N, int nfreqs, double* F, double* G,
 				while (++k < mid)
 				{
 					f = (double)k / (double)mid;
-					highmag *= fhigh4 / (f * f * f * f);
+					highmag = A[high] * fhigh4 / (f * f * f * f);
 					if (highmag < 1.0e-100) highmag = 1.0e-100;
 					A[k] = highmag;
 				}
