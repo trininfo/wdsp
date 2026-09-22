@@ -35,6 +35,7 @@ typedef struct _iqc
 
 	volatile long run;
 	volatile long busy;
+	volatile long closing;	// set by destroy_calcc: stop waiting for the DSP thread to take a curve
 	int size;
 	double* in;
 	double* out;

@@ -246,7 +246,7 @@ void SetTXAiqcSwap (int channel, NS_Spline* m_spline, CurveEMA* m_calavg, double
 	a->count = 0;
 	LeaveCriticalSection (&ch[channel].csDSP);
 
-	while (_InterlockedAnd (&a->busy, 1)) Sleep(1);
+	while (_InterlockedAnd (&a->busy, 1) && !_InterlockedAnd (&a->closing, 1)) Sleep(1);
 }
 
 
@@ -277,7 +277,7 @@ void SetTXAiqcStart (int channel, NS_Spline* m_spline, CurveEMA* m_calavg, doubl
 	a->count = 0;
 	LeaveCriticalSection (&ch[channel].csDSP);
 	InterlockedBitTestAndSet   (&txa[channel].iqc.p->run, 0);
-	while (_InterlockedAnd (&a->busy, 1)) Sleep(1);
+	while (_InterlockedAnd (&a->busy, 1) && !_InterlockedAnd (&a->closing, 1)) Sleep(1);
 }
 
 void SetTXAiqcEnd (int channel)
@@ -288,7 +288,7 @@ void SetTXAiqcEnd (int channel)
 	a->state = END;
 	a->count = 0;
 	LeaveCriticalSection (&ch[channel].csDSP);
-	while (_InterlockedAnd (&a->busy, 1)) Sleep(1);
+	while (_InterlockedAnd (&a->busy, 1) && !_InterlockedAnd (&a->closing, 1)) Sleep(1);
 	InterlockedBitTestAndReset (&txa[channel].iqc.p->run, 0);
 }
 

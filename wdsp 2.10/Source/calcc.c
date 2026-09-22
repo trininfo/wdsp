@@ -1087,19 +1087,26 @@ void destroy_calcc (CALCC a)
 {
 	IQC b = txa[a->channel].iqc.p;
 
+	// Stop the worker (doPSCorrChange) before freeing anything it may be using. It may be
+	// in the middle of a fit, a save or a restore, and a fit can take longer than any fixed
+	// timeout; once it is done it must not wait in iqc's hand-over loops for a DSP thread
+	// that is no longer running, hence 'closing'.
+	for (int i = 0; i < 4; i++)
+		while (WaitForSingleObject(a->SemsPSCorr[i], 0) == WAIT_OBJECT_0);
+	InterlockedBitTestAndSet(&b->closing, 0);
+	InterlockedBitTestAndReset(&b->busy, 0);
+	ReleaseSemaphore(a->SemsPSCorr[4], 1, 0);
+	WaitForSingleObject(a->hCorrChangeExited, INFINITE);
+	CloseHandle(a->hCorrChangeExited);
+	for (int i = 0; i < 5; i++)
+		CloseHandle(a->SemsPSCorr[i]);
+
 	ns_free(a->util.m_spline_restore); a->util.m_spline_restore = NULL;
 	ns_free(a->util.c_spline_restore); a->util.c_spline_restore = NULL;
 	ns_free(a->util.s_spline_restore); a->util.s_spline_restore = NULL;
 	ns_free(a->util.m_spline_save);    a->util.m_spline_save = NULL;
 	ns_free(a->util.c_spline_save);    a->util.c_spline_save = NULL;
 	ns_free(a->util.s_spline_save);    a->util.s_spline_save = NULL;
-
-	for (int i = 0; i < 4; i++)
-		while (WaitForSingleObject(a->SemsPSCorr[i], 0) == WAIT_OBJECT_0);
-	InterlockedBitTestAndReset(&b->busy, 0);
-	ReleaseSemaphore(a->SemsPSCorr[4], 1, 0);
-	WaitForSingleObject(a->hCorrChangeExited, 500);
-	CloseHandle(a->hCorrChangeExited);
 
 	ns_free(a->m_spline); a->m_spline = NULL;
 	ns_free(a->c_spline); a->c_spline = NULL;
