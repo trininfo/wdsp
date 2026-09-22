@@ -801,6 +801,11 @@ void SetRXAWBFMdmph(int channel, int dmph_run, int dmph_continent)
 		EnterCriticalSection(&ch[channel].csDSP);
 		a->dmph = dmph_run;
 		a->dmph_type = dmph_continent;
+		// The two filters were built from the settings at create time; update them too.
+		a->dmphL->run = a->dmphR->run = dmph_run;
+		a->dmphL->tau = a->dmphR->tau = dmph_continent ? 50.0e-6 : 75.0e-6;
+		calc_dmph(a->dmphL);
+		calc_dmph(a->dmphR);
 		LeaveCriticalSection(&ch[channel].csDSP);
 	}
 }
