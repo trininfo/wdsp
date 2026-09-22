@@ -2297,7 +2297,7 @@ void SetPSFeedbackRate (int channel, int rate)
 		0,
 		a->rate,
 		20.0e-09,
-		0.0);
+		(a->txdel < 0.0) ? -a->txdel : 0.0);	// a negative TX delay delays rx (SetPSTXDelay)
 	a->txdelay = create_delay (
 		1,
 		0,
@@ -2305,7 +2305,7 @@ void SetPSFeedbackRate (int channel, int rate)
 		0,
 		a->rate,
 		20.0e-09,
-		a->txdel);
+		(a->txdel > 0.0) ? a->txdel : 0.0);
 	LeaveCriticalSection (&txa[channel].calcc.cs_update);
 }
 
