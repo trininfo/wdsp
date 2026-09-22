@@ -691,26 +691,34 @@ void GetTXACFCOMPDisplayCompression(int channel, double* comp_values, int* ready
 	if (*ready)
 	{
 		int step = (a->msize - 1) / 1024;
-		for (int i = 0, j = 0; i < 1025; i++, j += step)
+		// Each display point shows the most compression among the 'step' bins around it,
+		// so a narrow signal between two sampled bins still shows.
+		for (int i = 0; i < 1025; i++)
 		{
-			double gain = a->cfc_gain_copy[j];
-			double delta = a->delta_copy[j];
-			if (delta <= 0.0 || gain <= 0.0)
+			int jlo = i * step - step / 2;
+			int jhi = i * step + (step - 1) / 2;
+			if (jlo < 0) jlo = 0;
+			if (jhi > a->msize - 1) jhi = a->msize - 1;
+			if (jhi < jlo) jhi = jlo;
+			double best = 0.0;
+			for (int j = jlo; j <= jhi; j++)
 			{
-				comp_values[i] = 0.0;
-			}
-			else
-			{
-				double denom = gain - delta;
-				if (denom <= 1e-20)
-				{
-					comp_values[i] = 40.0;
-				}
+				double gain = a->cfc_gain_copy[j];
+				double delta = a->delta_copy[j];
+				double value;
+				if (delta <= 0.0 || gain <= 0.0)
+					value = 0.0;
 				else
 				{
-					comp_values[i] = 20.0 * mlog10(gain / denom);
+					double denom = gain - delta;
+					if (denom <= 1e-20)
+						value = 40.0;
+					else
+						value = 20.0 * mlog10(gain / denom);
 				}
+				if (value > best) best = value;
 			}
+			comp_values[i] = best;
 		}
 	}
 }
