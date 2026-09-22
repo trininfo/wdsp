@@ -310,5 +310,6 @@ void destroy_nurbs (NURBS a)
 	_aligned_free (a->W);
 	_aligned_free (a->CP);
 	_aligned_free (a->U);
+	_aligned_free (a);
 }
 
