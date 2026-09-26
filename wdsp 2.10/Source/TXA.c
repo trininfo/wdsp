@@ -238,6 +238,25 @@ void create_txa (int channel)
 		TXA_CFC_GAIN,								// index for gain value
 		&txa[channel].cfcomp.p->gain);				// pointer for gain computation
 
+	txa[channel].reverb.p = create_reverb (
+		0,											// run, off until asked for
+		ch[channel].dsp_size,						// size
+		txa[channel].midbuff,						// input buffer
+		txa[channel].midbuff,						// output buffer
+		ch[channel].dsp_rate,						// sample rate
+		0.15,										// mix, wet against dry
+		0.0,										// dry trim, dB
+		-6.0,										// wet trim, dB
+		0.0,										// output trim, dB
+		1.2,										// decay to -60 dB, seconds
+		12.0,										// pre-delay, ms
+		0.35,										// damping, loss per pass
+		120.0,										// low cut into the tank, Hz
+		7000.0,										// high cut into the tank, Hz
+		0.62,										// diffusion
+		0.7,										// modulation rate, Hz
+		0.4);										// modulation depth
+
 	txa[channel].bp0.p = create_bandpass (
 		1,											// always runs
 		0,											// position
@@ -491,6 +510,7 @@ void destroy_txa (int channel)
 	destroy_compressor (txa[channel].compressor.p);
 	destroy_bandpass (txa[channel].bp0.p);
 	destroy_meter (txa[channel].cfcmeter.p);
+	destroy_reverb (txa[channel].reverb.p);
 	destroy_cfcomp (txa[channel].cfcomp.p);
 	destroy_meter (txa[channel].lvlrmeter.p);
 	destroy_wcpagc (txa[channel].leveler.p);
@@ -525,6 +545,7 @@ void flush_txa (int channel)
 	flush_wcpagc (txa[channel].leveler.p);
 	flush_meter (txa[channel].lvlrmeter.p);
 	flush_cfcomp (txa[channel].cfcomp.p);
+	flush_reverb (txa[channel].reverb.p);
 	flush_meter (txa[channel].cfcmeter.p);
 	flush_bandpass (txa[channel].bp0.p);
 	flush_compressor (txa[channel].compressor.p);
@@ -562,6 +583,9 @@ void xtxa (int channel)
 	xmeter (txa[channel].lvlrmeter.p);				// Leveler Meter
 	xcfcomp (txa[channel].cfcomp.p, 0);				// Continuous Frequency Compressor with post-EQ
 	xmeter (txa[channel].cfcmeter.p);				// CFC+PostEQ Meter
+	xreverb (txa[channel].reverb.p);				// plate reverb: ahead of bp0, so COMP, CESSB
+													//   and the ALC bound the tail, and gen1 below
+													//   (TUN, two-tone) stays uncoloured
 	xbandpass (txa[channel].bp0.p, 0);				// primary bandpass filter
 	xcompressor (txa[channel].compressor.p);		// COMP compressor
 	xbandpass (txa[channel].bp1.p, 0);				// aux bandpass (runs if COMP)
@@ -636,6 +660,7 @@ void setDSPSamplerate_txa (int channel)
 	setSamplerate_wcpagc (txa[channel].leveler.p, ch[channel].dsp_rate);
 	setSamplerate_meter (txa[channel].lvlrmeter.p, ch[channel].dsp_rate);
 	setSamplerate_cfcomp (txa[channel].cfcomp.p, ch[channel].dsp_rate);
+	setSamplerate_reverb (txa[channel].reverb.p, ch[channel].dsp_rate);
 	setSamplerate_meter (txa[channel].cfcmeter.p, ch[channel].dsp_rate);
 	setSamplerate_bandpass (txa[channel].bp0.p, ch[channel].dsp_rate);
 	setSamplerate_compressor (txa[channel].compressor.p, ch[channel].dsp_rate);
@@ -696,6 +721,8 @@ void setDSPBuffsize_txa (int channel)
 	setSize_meter (txa[channel].lvlrmeter.p, ch[channel].dsp_size);
 	setBuffers_cfcomp (txa[channel].cfcomp.p, txa[channel].midbuff, txa[channel].midbuff);
 	setSize_cfcomp (txa[channel].cfcomp.p, ch[channel].dsp_size);
+	setBuffers_reverb (txa[channel].reverb.p, txa[channel].midbuff, txa[channel].midbuff);
+	setSize_reverb (txa[channel].reverb.p, ch[channel].dsp_size);
 	setBuffers_meter (txa[channel].cfcmeter.p, txa[channel].midbuff);
 	setSize_meter (txa[channel].cfcmeter.p, ch[channel].dsp_size);
 	setBuffers_bandpass (txa[channel].bp0.p, txa[channel].midbuff, txa[channel].midbuff);

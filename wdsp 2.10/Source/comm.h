@@ -84,6 +84,7 @@ warren@wpratt.com
 #include "osctrl.h"
 #include "patchpanel.h"
 #include "phrot.h"
+#include "reverb.h"
 #include "resample.h"
 #include "reshb.h"
 #include "rmatch.h"

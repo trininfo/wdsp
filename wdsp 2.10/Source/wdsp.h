@@ -669,6 +669,11 @@ WDSP_API void SetTXAPHROTNstages (int channel, int nstages);
 WDSP_API void SetTXAPHROTReverse (int channel, int reverse);
 WDSP_API void SetTXAPHROTRun (int channel, int run);
 
+/*  ---- reverb.c ---------------------------------------------------------- */
+
+WDSP_API void SetTXAReverbConfig (int channel, double mix, double dry_db, double wet_db, double out_db, double decay_seconds, double predelay_ms, double damping, double low_cut_hz, double high_cut_hz, double diffusion, double mod_rate_hz, double mod_depth);
+WDSP_API void SetTXAReverbRun (int channel, int run);
+
 /*  ---- resample.c -------------------------------------------------------- */
 
 WDSP_API RESAMPLE create_resample (int run, int size, double* in, double* out, int in_rate, int out_rate, double fc, int ncoef, double gain);

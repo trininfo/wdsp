@@ -108,6 +108,10 @@ struct _txa
 	} cfcomp;
 	struct
 	{
+		REVERB p;
+	} reverb;
+	struct
+	{
 		COMPRESSOR p;
 	} compressor;
 	struct
