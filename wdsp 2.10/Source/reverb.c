@@ -95,7 +95,13 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
     one does.  WDSP does not set flush-to-zero anywhere, so a tail left to fade
     on its own would quietly make the transmit thread miss its deadline minutes
     after the operator stopped talking.  1e-20 is some 400 dB below full scale:
-    inaudible, and nowhere near the -60 dB the decay time is measured to.  */
+    inaudible, and nowhere near the -60 dB the decay time is measured to.
+
+    It is applied at EVERY state that decays: the tank feedback, each allpass's
+    stored value and each one-pole's state.  Squelching only the feedback was
+    tried first, and it left the eight allpasses to decay on their own — by a
+    factor of g per line length, which from 1e-20 to underflow is on the order
+    of a million samples of denormal arithmetic after the input goes silent.  */
 #define RV_DENORM     1.0e-20
 
 static double rv_squelch (double x)
@@ -192,7 +198,7 @@ static double rv_line_tap (rvline* L, double frac)
 static double rv_allpass (rvline* L, double g, double x)
 {
 	double w = rv_line_read (L);
-	double v = x + g * w;
+	double v = rv_squelch (x + g * w);
 	rv_line_write (L, v);
 	return w - g * v;
 }
@@ -202,7 +208,7 @@ static double rv_allpass (rvline* L, double g, double x)
 static double rv_allpass_mod (rvline* L, double g, double x, double delay)
 {
 	double w = rv_line_read_frac (L, delay);
-	double v = x + g * w;
+	double v = rv_squelch (x + g * w);
 	rv_line_write (L, v);
 	return w - g * v;
 }
@@ -211,7 +217,7 @@ static double rv_allpass_mod (rvline* L, double g, double x, double delay)
     taken each sample.  */
 static double rv_lowpass (double* z, double c, double x)
 {
-	*z += c * (x - *z);
+	*z = rv_squelch (*z + c * (x - *z));
 	return *z;
 }
 
