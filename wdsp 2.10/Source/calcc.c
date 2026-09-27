@@ -156,6 +156,7 @@ typedef struct _calcc
 		double env_maxtx;
 		volatile long running;
 		int bs_count;
+		int nofit;				// the last calc produced no fit to judge, not a bad one (3.1)
 		volatile long current_state;
 	} ctrl;
 	struct _disp
@@ -224,7 +225,7 @@ void print_EQ_Samples(CALCC a);
 #define DCB_ALPHA				  0.30
 
 #define EQ_ENABLE                 1            
-#define EQ_MIN_PTS		          60            
+#define EQ_MIN_PTS		          40            /* was 60: a periodic two-tone at 192 kHz populates ~57 bins (3.1) */
 #define EQ_NBINS                  100            
 #define EQ_MODE                   0		         
 #define EQ_ROBUST_X               0.20	        
@@ -800,6 +801,37 @@ static int scheck(CALCC a)
 	return scheck_fail;
 }
 
+/*  Forget everything learned by the fits — the splines, the control-point and curve EMAs,
+    the pins and the scheck reference — WITHOUT touching the correction iqc is applying,
+    which holds its own copies.  This is the fit-history half of LRESET, factored out so a
+    running correction can be kept while calcc learns again from nothing (3.1).  */
+static void forget_fit_history(CALCC a)
+{
+	if (!a->ctrl.calcinprogress)
+	{
+		ns_free(a->m_spline); a->m_spline = NULL;
+		ns_free(a->c_spline); a->c_spline = NULL;
+		ns_free(a->s_spline); a->s_spline = NULL;
+		nf_curve_free(a->m_nurb); a->m_nurb = NULL;
+		nf_curve_free(a->c_nurb); a->c_nurb = NULL;
+		nf_curve_free(a->s_nurb); a->s_nurb = NULL;
+	}
+	a->m_prev_y = 1.0; a->c_prev_y = 1.0; a->s_prev_y = 0.0;
+	curve_ema_init2(&a->m_calavg, PS_NS_EMA_ALPHA, PS_NS_EMA_ALPHA_LO, PS_NS_EMA_X_BND,  0.1, 2.0);
+	curve_ema_init2(&a->c_calavg, PS_NS_EMA_ALPHA, PS_NS_EMA_ALPHA_LO, PS_NS_EMA_X_BND, -1.1, 1.1);
+	curve_ema_init2(&a->s_calavg, PS_NS_EMA_ALPHA, PS_NS_EMA_ALPHA_LO, PS_NS_EMA_X_BND, -1.1, 1.1);
+	a->m_fold_prev      = 0;
+	a->m_ctrl_ema_valid = 0;
+	a->c_ctrl_ema_valid = 0;
+	a->s_ctrl_ema_valid = 0;
+	a->m_y_pin_valid = 0; a->m_y_pin_ema = 1.0; a->m_pin_cycle = 0;
+	a->c_y_pin_valid = 0; a->c_y_pin_ema = 1.0; a->c_pin_cycle = 0;
+	a->s_y_pin_valid = 0; a->s_y_pin_ema = 0.0; a->s_pin_cycle = 0;
+	a->scheck_valid = 0;
+	a->ctrl.nofit = 0;
+	a->ctrl.env_maxtx = 0.0;
+}
+
 static int sin_cos_identity_check(CALCC a)
 {
 	int error = 0;
@@ -1159,7 +1191,11 @@ static void calc (CALCC a)
 	a->rx_scale = 1.0 / Extrapolate_Res.y_at_1;
 	if (Extrapolate_Res.confidence)
 	{
+		/* A sparse tail — a pause in speech leaves the top of the drive range thin — is
+		   not a bad amplifier.  Recorded, and the collection is repeated, but it does not
+		   count toward the strikes that would restart everything (3.1). */
 		a->binfo[0] |= 0b0001;
+		a->ctrl.nofit = 1;
 		goto cleanup;
 	}
 
@@ -1468,16 +1504,14 @@ static void calc (CALCC a)
 	{
 		const double alpha = 0.10;
 		int nc = a->m_nurb->n_ctrl;
-		if (!a->m_ctrl_ema_valid)
+		/* Seed on a cold start, and again whenever the fold refit has changed the
+		   polygon's length: with uniform knots a 20-point and an 18-point polygon do not
+		   share knot positions, so blending them point-for-point is a distorted curve
+		   that the accuracy check cannot see.  (The cold-start test that stood here
+		   evaluated a->m_spline, which is always NULL at this point; the pins clamp the
+		   left end.  3.1) */
+		if (!a->m_ctrl_ema_valid || nc != a->m_ctrl_n)
 		{
-			const double COLD_START_LEFT_MAX = 1.8;
-			double left_val = ns_eval_near_clamped(a->m_spline, 0.04,
-				a->m_calavg.ys[0]);
-			if (left_val > COLD_START_LEFT_MAX)
-			{
-				a->binfo[1] |= 0b00100000;
-				goto cleanup;
-			}
 			for (int k = 0; k < nc; k++)
 			{
 				a->m_ctrl_ema_x[k] = a->m_nurb->ctrl_wx[k];
@@ -1506,16 +1540,8 @@ static void calc (CALCC a)
 	{
 		const double alpha = 0.10;
 		int nc = a->c_nurb->n_ctrl;
-		if (!a->c_ctrl_ema_valid)
+		if (!a->c_ctrl_ema_valid || nc != a->c_ctrl_n)
 		{
-			const double COLD_START_COS_MAX = 1.1;
-			double c_left_val = ns_eval_near_clamped(a->c_spline, 0.04,
-				a->c_calavg.ys[0]);
-			if (fabs(c_left_val) > COLD_START_COS_MAX)
-			{
-				a->binfo[2] |= 0b00100000;
-				goto cleanup;
-			}
 			for (int k = 0; k < nc; k++)
 			{
 				a->c_ctrl_ema_x[k] = a->c_nurb->ctrl_wx[k];
@@ -1544,16 +1570,8 @@ static void calc (CALCC a)
 	{
 		const double alpha = 0.10;
 		int nc = a->s_nurb->n_ctrl;
-		if (!a->s_ctrl_ema_valid)
+		if (!a->s_ctrl_ema_valid || nc != a->s_ctrl_n)
 		{
-			const double COLD_START_SIN_MAX = 1.1;
-			double s_left_val = ns_eval_near_clamped(a->s_spline, 0.04,
-			                        a->s_calavg.ys[0]);
-			if (fabs(s_left_val) > COLD_START_SIN_MAX)
-			{
-				a->binfo[3] |= 0b00100000;
-				goto cleanup;
-			}
 			for (int k = 0; k < nc; k++)
 			{
 				a->s_ctrl_ema_x[k] = a->s_nurb->ctrl_wx[k];
@@ -1672,6 +1690,22 @@ static void calc (CALCC a)
 	curve_ema_update(&a->c_calavg, a->c_spline);
 	a->c_prev_y = a->c_calavg.ys[0];
 	curve_ema_update(&a->s_calavg, a->s_spline);
+	a->s_prev_y = a->s_calavg.ys[0];
+	/* cos and sin are fitted separately and only CHECKED to be a unit phasor (above,
+	   +/-0.05); what iqc applies is their magnitude times the mag correction, so any
+	   departure is a gain error.  Normalise the two grids point-wise, with a floor so a
+	   pathological pair cannot blow up (3.1). */
+	for (int k = 0; k < CURVE_EMA_PTS; k++)
+	{
+		double c = a->c_calavg.ys[k], sn = a->s_calavg.ys[k];
+		double mag = sqrt(c * c + sn * sn);
+		if (mag > 0.5)
+		{
+			a->c_calavg.ys[k] = c / mag;
+			a->s_calavg.ys[k] = sn / mag;
+		}
+	}
+	a->c_prev_y = a->c_calavg.ys[0];
 	a->s_prev_y = a->s_calavg.ys[0];
 
 	EnterCriticalSection (&a->disp.cs_disp);
@@ -1920,6 +1954,7 @@ void pscc (int channel, int size, double* tx, double* rx)
 				a->c_y_pin_valid = 0; a->c_y_pin_ema = 1.0; a->c_pin_cycle = 0;
 				a->s_y_pin_valid = 0; a->s_y_pin_ema = 0.0; a->s_pin_cycle = 0;
 				a->scheck_valid = 0;
+				a->ctrl.nofit = 0;
 				a->ctrl.reset = 0;
 				if (!a->ctrl.turnon)
 					if (InterlockedBitTestAndReset(&a->ctrl.running, 0))
@@ -2042,8 +2077,32 @@ void pscc (int channel, int size, double* tx, double* rx)
 							a->ctrl.state = LDELAY;
 						}
 					}
+					else if (a->ctrl.nofit)
+					{
+						/* Nothing to judge: collect again without a strike (3.1). */
+						a->ctrl.nofit = 0;
+						if (InterlockedAnd (&a->mox, 1))
+							a->ctrl.state = LSETUP;
+						else a->ctrl.state = LWAIT;
+					}
 					else if (++(a->ctrl.bs_count) >= 3)
-						a->ctrl.state = LRESET;
+					{
+						if (_InterlockedAnd (&a->ctrl.running, 1))
+						{
+							/* Three rejected COLLECTIONS say nothing about the curve already
+							   on the air, which was accepted a moment ago.  Keep it, forget
+							   the fit history, and learn again beside it; only a reset, a mode
+							   change or a turn-on ends a running correction (3.1). */
+							forget_fit_history (a);
+							a->ctrl.bs_count = 0;
+							a->info[6] |= 4;
+							if (InterlockedAnd (&a->mox, 1))
+								a->ctrl.state = LSETUP;
+							else a->ctrl.state = LWAIT;
+						}
+						else
+							a->ctrl.state = LRESET;
+					}
 					else if (InterlockedAnd (&a->mox, 1))
 						a->ctrl.state = LSETUP;
 					else a->ctrl.state = LWAIT;

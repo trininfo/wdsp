@@ -1328,13 +1328,9 @@ NF_Curve *nf_fit(NF_WS ws, const NF_Point2 *pts, int n_pts,
                                            t_params, cv_mask,
                                            cfg.outlier_sigma);
     result.n_ctrl_final = c->n_ctrl;
-    if (n_cv > 0 && result.rms > 0.0) {
-        double cv_ratio = result.cv_score / result.rms;
-        if (cv_ratio > cfg.cv_overfit_ratio)
-            result.quality |= NF_FIT_CV_MARGINAL;
-        if (cfg.cv_fatal_ratio > 0.0 && cv_ratio > cfg.cv_fatal_ratio)
-            result.quality |= NF_FIT_BAD_OVERFIT;
-    }
+    /* The cross-validation test against result.rms lives after result.rms is computed,
+       below.  It sat here, where rms was still the memset zero, so its guard `rms > 0`
+       never passed and NF_FIT_BAD_OVERFIT could never be set (3.1). */
     if (cfg.irls_iters > 0) {
         double *w_data = ws->w_data;
         for (int iter = 0; iter < cfg.irls_iters; iter++) {
@@ -1381,6 +1377,13 @@ NF_Curve *nf_fit(NF_WS ws, const NF_Point2 *pts, int n_pts,
             sse += sq(ev.x-pts_work[i].x) + sq(ev.y-pts_work[i].y);
         }
         result.rms = (m_work > 0) ? sqrt(sse/m_work) : 0.0;
+        if (n_cv > 0 && result.rms > 0.0) {
+            double cv_ratio = result.cv_score / result.rms;
+            if (cv_ratio > cfg.cv_overfit_ratio)
+                result.quality |= NF_FIT_CV_MARGINAL;
+            if (cfg.cv_fatal_ratio > 0.0 && cv_ratio > cfg.cv_fatal_ratio)
+                result.quality |= NF_FIT_BAD_OVERFIT;
+        }
         if (total_outliers > 0) {
             double sse_out = 0.0;
             int    n_out   = 0;
