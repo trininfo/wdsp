@@ -257,6 +257,12 @@ void create_txa (int channel)
 		0.7,										// modulation rate, Hz
 		0.4);										// modulation depth
 
+	txa[channel].montap.p = create_montap (
+		0,											// run, off until a monitor asks
+		0,											// site, none
+		ch[channel].dsp_size,						// size
+		txa[channel].midbuff);						// the buffer every stage works in
+
 	txa[channel].bp0.p = create_bandpass (
 		1,											// always runs
 		0,											// position
@@ -511,6 +517,7 @@ void destroy_txa (int channel)
 	destroy_bandpass (txa[channel].bp0.p);
 	destroy_meter (txa[channel].cfcmeter.p);
 	destroy_reverb (txa[channel].reverb.p);
+	destroy_montap (txa[channel].montap.p);
 	destroy_cfcomp (txa[channel].cfcomp.p);
 	destroy_meter (txa[channel].lvlrmeter.p);
 	destroy_wcpagc (txa[channel].leveler.p);
@@ -546,6 +553,7 @@ void flush_txa (int channel)
 	flush_meter (txa[channel].lvlrmeter.p);
 	flush_cfcomp (txa[channel].cfcomp.p);
 	flush_reverb (txa[channel].reverb.p);
+	flush_montap (txa[channel].montap.p);
 	flush_meter (txa[channel].cfcmeter.p);
 	flush_bandpass (txa[channel].bp0.p);
 	flush_compressor (txa[channel].compressor.p);
@@ -573,31 +581,39 @@ void xtxa (int channel)
 	xgen (txa[channel].gen0.p);						// input signal generator
 	xpanel (txa[channel].panel.p);					// includes MIC gain
 	xphrot (txa[channel].phrot.p);					// phase rotator
+	xmontap (txa[channel].montap.p, MONTAP_AFTER_PANEL);	// monitor tap: a copy, never an insert
 	xmeter (txa[channel].micmeter.p);				// MIC meter
 	xamsqcap (txa[channel].amsq.p);					// downward expander capture
 	xamsq (txa[channel].amsq.p);					// downward expander action
 	xeqp (txa[channel].eqp.p);						// pre-EQ
+	xmontap (txa[channel].montap.p, MONTAP_AFTER_EQ);
 	xmeter (txa[channel].eqmeter.p);				// EQ meter
 	xemphp (txa[channel].preemph.p, 0);				// FM pre-emphasis (first option)
 	xwcpagc (txa[channel].leveler.p);				// Leveler
+	xmontap (txa[channel].montap.p, MONTAP_AFTER_LEVELER);
 	xmeter (txa[channel].lvlrmeter.p);				// Leveler Meter
 	xcfcomp (txa[channel].cfcomp.p, 0);				// Continuous Frequency Compressor with post-EQ
+	xmontap (txa[channel].montap.p, MONTAP_AFTER_CFC);
 	xmeter (txa[channel].cfcmeter.p);				// CFC+PostEQ Meter
 	xreverb (txa[channel].reverb.p);				// plate reverb: ahead of bp0, so COMP, CESSB
 													//   and the ALC bound the tail, and gen1 below
 													//   (TUN, two-tone) stays uncoloured
+	xmontap (txa[channel].montap.p, MONTAP_AFTER_REVERB);
 	xbandpass (txa[channel].bp0.p, 0);				// primary bandpass filter
 	xcompressor (txa[channel].compressor.p);		// COMP compressor
 	xbandpass (txa[channel].bp1.p, 0);				// aux bandpass (runs if COMP)
 	xosctrl (txa[channel].osctrl.p);				// CESSB Overshoot Control
 	xbandpass (txa[channel].bp2.p, 0);				// aux bandpass (runs if CESSB)
+	xmontap (txa[channel].montap.p, MONTAP_AFTER_COMP);
 	xmeter (txa[channel].compmeter.p);				// COMP meter
 	xwcpagc (txa[channel].alc.p);					// ALC
+	xmontap (txa[channel].montap.p, MONTAP_AFTER_ALC);
 	xammod (txa[channel].ammod.p);					// AM Modulator
 	xemphp (txa[channel].preemph.p, 1);				// FM pre-emphasis (second option)
 	xfmmod (txa[channel].fmmod.p);					// FM Modulator
 	xgen (txa[channel].gen1.p);						// output signal generator (TUN and Two-tone)
 	xuslew (txa[channel].uslew.p);					// up-slew for AM, FM, and gens
+	xmontap (txa[channel].montap.p, MONTAP_OUT);
 	xmeter (txa[channel].alcmeter.p);				// ALC Meter
 	xsiphon (txa[channel].sip1.p, 0);				// siphon data for display
 	xiqc (txa[channel].iqc.p);						// PureSignal correction
@@ -723,6 +739,8 @@ void setDSPBuffsize_txa (int channel)
 	setSize_cfcomp (txa[channel].cfcomp.p, ch[channel].dsp_size);
 	setBuffers_reverb (txa[channel].reverb.p, txa[channel].midbuff, txa[channel].midbuff);
 	setSize_reverb (txa[channel].reverb.p, ch[channel].dsp_size);
+	setBuffers_montap (txa[channel].montap.p, txa[channel].midbuff);
+	setSize_montap (txa[channel].montap.p, ch[channel].dsp_size);
 	setBuffers_meter (txa[channel].cfcmeter.p, txa[channel].midbuff);
 	setSize_meter (txa[channel].cfcmeter.p, ch[channel].dsp_size);
 	setBuffers_bandpass (txa[channel].bp0.p, txa[channel].midbuff, txa[channel].midbuff);

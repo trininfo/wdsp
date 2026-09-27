@@ -112,6 +112,10 @@ struct _txa
 	} reverb;
 	struct
 	{
+		MONTAP p;
+	} montap;
+	struct
+	{
 		COMPRESSOR p;
 	} compressor;
 	struct

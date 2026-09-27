@@ -674,6 +674,11 @@ WDSP_API void SetTXAPHROTRun (int channel, int run);
 WDSP_API void SetTXAReverbConfig (int channel, double mix, double dry_db, double wet_db, double out_db, double decay_seconds, double predelay_ms, double damping, double low_cut_hz, double high_cut_hz, double diffusion, double mod_rate_hz, double mod_depth);
 WDSP_API void SetTXAReverbRun (int channel, int run);
 
+/*  ---- montap.c ---------------------------------------------------------- */
+
+WDSP_API void SetTXAMonitorTap (int channel, int run, int site);
+WDSP_API int GetTXAMonitorBlock (int channel, double* out);
+
 /*  ---- resample.c -------------------------------------------------------- */
 
 WDSP_API RESAMPLE create_resample (int run, int size, double* in, double* out, int in_rate, int out_rate, double fc, int ncoef, double gain);
