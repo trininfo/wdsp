@@ -31,7 +31,11 @@ sources rely on, read from the call sites:
   CRITICAL_SECTION       recursive: setters take csDSP while the DSP thread
                          holds it for a block, and a setter can call another
                          setter (channel.c, main.c). So a RECURSIVE pthread
-                         mutex, never a plain one.
+                         mutex, never a plain one; with PRIO_INHERIT, because
+                         the DSP thread runs at SCHED_FIFO (below) while the
+                         setters that take csDSP from the HTTP side do not,
+                         and without inheritance a preempted setter holds the
+                         FIFO thread.
   Interlocked*           InterlockedBitTestAndSet/Reset return the PREVIOUS
                          value of the bit (analyzer.c:1068, calcc.c:1836 test
                          it); InterlockedAnd/_InterlockedAnd return the
@@ -52,7 +56,12 @@ sources rely on, read from the call sites:
   QueueUserWorkItem      analyzer.c:1074 queues one FFT (`DWORD WINAPI
                          spectra(void*)`) per display frame; a detached thread
                          per call.
-  Semaphores, events     CreateSemaphore(initial, max), ReleaseSemaphore(n),
+  Semaphores, events     CreateSemaphore(initial, max), ReleaseSemaphore(n) --
+                         which FAILS and leaves the count alone when count + n
+                         would pass max: calcc's five command semaphores and
+                         Sem_Flush are created with max 1 (calcc.c:1111,
+                         iobuffs.c:421), so a command released twice before the
+                         worker takes it runs once --
                          CreateEvent(manualReset, initial), SetEvent,
                          ResetEvent, WaitForSingleObject(ms) with 0, 1, a
                          timeout and INFINITE (iobuffs.c:455 drains with
@@ -61,6 +70,11 @@ sources rely on, read from the call sites:
                          INFINITE) returning WAIT_OBJECT_0 + the index
                          (calcc.c:1790). Objects share one lock so a
                          multi-object wait is atomic against the signals.
+                         Every timed wait is on CLOCK_MONOTONIC: a Pi has no
+                         RTC and steps its clock at the first NTP sync, and the
+                         1 ms drain polls (iobuffs.c:455, syncbuffs.c:94) exit
+                         only on timeout, so a wall-clock deadline would stall
+                         a channel close by the size of the step.
   Sleep(ms)              nanosleep.
   QueryPerformanceCounter/Frequency  CLOCK_MONOTONIC (nnet.c:1289, profiling).
   AvSetMmThreadCharacteristics("Pro Audio")  main.c:32 asks for the realtime
@@ -200,6 +214,7 @@ static inline void InitializeCriticalSection(LPCRITICAL_SECTION cs)
 	pthread_mutexattr_t a;
 	pthread_mutexattr_init(&a);
 	pthread_mutexattr_settype(&a, PTHREAD_MUTEX_RECURSIVE);
+	pthread_mutexattr_setprotocol(&a, PTHREAD_PRIO_INHERIT);
 	pthread_mutex_init(&cs->m, &a);
 	pthread_mutexattr_destroy(&a);
 }
@@ -251,6 +266,7 @@ struct posix_shim_object {
 	int kind;
 	int manual;      /* events: manual reset */
 	long count;      /* semaphores: count; events: signaled */
+	long max;        /* semaphores: the ceiling ReleaseSemaphore refuses to pass */
 	pthread_cond_t c;
 };
 
@@ -260,27 +276,55 @@ struct posix_shim_registry {
 	int multi_waiters;
 };
 
-static inline struct posix_shim_registry *posix_shim_reg(void)
+/* Every condition waits on CLOCK_MONOTONIC (see the note at the top). */
+static inline void posix_shim_cond_init(pthread_cond_t *c)
 {
-	static struct posix_shim_registry r = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0 };
-	return &r;
+	pthread_condattr_t a;
+	pthread_condattr_init(&a);
+	pthread_condattr_setclock(&a, CLOCK_MONOTONIC);
+	pthread_cond_init(c, &a);
+	pthread_condattr_destroy(&a);
 }
 
-static inline HANDLE posix_shim_new(int kind, int manual, long count)
+/* ONE registry for the process. This header is included by 80 translation units, and a
+   `static` object in a header -- or a static local inside a `static inline` function --
+   is one object PER UNIT: the first version of this shim had the registry lock as a
+   static local, so iobuffs.c's ReleaseSemaphore and main.c's WaitForSingleObject were
+   serialising on different mutexes, and the Linux tests passed anyway. Weak definitions
+   merge into one at link time (ELF, GCC and clang), which is why these are not static. */
+struct posix_shim_registry posix_shim_registry_instance __attribute__((weak));
+pthread_once_t posix_shim_registry_once __attribute__((weak)) = PTHREAD_ONCE_INIT;
+
+__attribute__((weak)) void posix_shim_registry_init(void)
+{
+	pthread_mutex_init(&posix_shim_registry_instance.m, NULL);
+	posix_shim_cond_init(&posix_shim_registry_instance.any);
+	posix_shim_registry_instance.multi_waiters = 0;
+}
+
+static inline struct posix_shim_registry *posix_shim_reg(void)
+{
+	pthread_once(&posix_shim_registry_once, posix_shim_registry_init);
+	return &posix_shim_registry_instance;
+}
+
+static inline HANDLE posix_shim_new(int kind, int manual, long count, long max)
 {
 	struct posix_shim_object *o = (struct posix_shim_object *)calloc(1, sizeof *o);
 	if (o == NULL) return NULL;
 	o->kind = kind;
 	o->manual = manual;
 	o->count = count;
-	pthread_cond_init(&o->c, NULL);
+	o->max = max;
+	posix_shim_cond_init(&o->c);
 	return (HANDLE)o;
 }
 
 static inline HANDLE CreateSemaphore(void *attr, long initial, long maximum, const void *name)
 {
-	(void)attr; (void)maximum; (void)name;
-	return posix_shim_new(POSIX_SHIM_SEMAPHORE, 0, initial);
+	(void)attr; (void)name;
+	if (maximum < 1 || initial < 0 || initial > maximum) return NULL; /* as Win32 refuses them */
+	return posix_shim_new(POSIX_SHIM_SEMAPHORE, 0, initial, maximum);
 }
 #define CreateSemaphoreW CreateSemaphore
 #define CreateSemaphoreA CreateSemaphore
@@ -288,7 +332,7 @@ static inline HANDLE CreateSemaphore(void *attr, long initial, long maximum, con
 static inline HANDLE CreateEvent(void *attr, BOOL manual_reset, BOOL initial, const void *name)
 {
 	(void)attr; (void)name;
-	return posix_shim_new(POSIX_SHIM_EVENT, manual_reset, initial ? 1 : 0);
+	return posix_shim_new(POSIX_SHIM_EVENT, manual_reset, initial ? 1 : 0, 1);
 }
 #define CreateEventW CreateEvent
 #define CreateEventA CreateEvent
@@ -314,7 +358,14 @@ static inline BOOL ReleaseSemaphore(HANDLE h, long n, long *previous)
 {
 	struct posix_shim_object *o = (struct posix_shim_object *)h;
 	if (o == NULL || o->kind != POSIX_SHIM_SEMAPHORE) return FALSE;
+	if (n < 1) return FALSE;
 	pthread_mutex_lock(&posix_shim_reg()->m);
+	if (o->count + n > o->max) {
+		/* Win32: the release fails and the count is unchanged. WDSP relies on it
+		   for its max-1 semaphores: a command released twice runs once. */
+		pthread_mutex_unlock(&posix_shim_reg()->m);
+		return FALSE;
+	}
 	if (previous) *previous = o->count;
 	o->count += n;
 	posix_shim_wake(o);
@@ -359,7 +410,7 @@ static inline DWORD WaitForSingleObject(HANDLE h, DWORD ms)
 	struct timespec deadline;
 	if (o == NULL) return WAIT_FAILED;
 	if (ms != INFINITE) {
-		clock_gettime(CLOCK_REALTIME, &deadline);
+		clock_gettime(CLOCK_MONOTONIC, &deadline);
 		deadline.tv_sec += ms / 1000;
 		deadline.tv_nsec += (long)(ms % 1000) * 1000000L;
 		if (deadline.tv_nsec >= 1000000000L) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000L; }
@@ -387,7 +438,7 @@ static inline DWORD WaitForMultipleObjects(DWORD n, const HANDLE *hs, BOOL wait_
 	DWORD i;
 	if (wait_all || n == 0) return WAIT_FAILED;
 	if (ms != INFINITE) {
-		clock_gettime(CLOCK_REALTIME, &deadline);
+		clock_gettime(CLOCK_MONOTONIC, &deadline);
 		deadline.tv_sec += ms / 1000;
 		deadline.tv_nsec += (long)(ms % 1000) * 1000000L;
 		if (deadline.tv_nsec >= 1000000000L) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000L; }
