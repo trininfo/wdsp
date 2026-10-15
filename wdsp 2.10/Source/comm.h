@@ -24,13 +24,17 @@ warren@wpratt.com
 
 */
 
+#if defined(_WIN32) || defined(_WIN64)
 #include <Windows.h>
 #include <process.h>
 #include <intrin.h>
+#include <avrt.h>
+#else
+#include "posix_shim.h"		// the Win32 primitives above, on POSIX; nothing else changes
+#endif
 #include <math.h>
 #include <stdint.h>
 #include <time.h>
-#include <avrt.h>
 #include <assert.h>
 #include "fftw3.h"
 
