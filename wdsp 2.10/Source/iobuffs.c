@@ -594,6 +594,21 @@ void dexchange (int channel, double* in, double* out)
 	   the thread leave through wdspmain's loop.  Every platform. */
 	if (!_InterlockedAnd (&ch[channel].run, 1)) return;
 
+	/* Take the next input out of r1 BEFORE handing the caller its output.  As released,
+	   the output was deposited and Sem_OutReady released first and r1 copied last; a
+	   caller blocked on Sem_OutReady wakes on that release and, two exchanges later with
+	   DSP_MULT 2, writes the very r1 slot this thread has not yet copied.  Nothing stops
+	   it: the ring has no input-space semaphore (the "add check ... overwrite" note in
+	   fexchange0 is Warren's own).  Preempt this thread between the release and the copy,
+	   which a loaded machine does, and one DSP block is processed on half-new input --
+	   measured as one block (two output exchanges) at -5.4 dB and 60 degrees off on a
+	   1 kHz tone, the stream otherwise aligned, 2-6 of 16 processes under sixteen-way load
+	   on Windows and more on Linux (Trident tests/loadprobe.rs).  With the copy first, a
+	   slot can only be overwritten after it has been taken. */
+	memcpy (out, a->r1_baseptr + 2 * a->r1_outidx, a->r1_outsize * sizeof (complex));
+	if ((a->r1_outidx += a->r1_outsize) == a->r1_active_buffsize)
+		a->r1_outidx = 0;
+
 	EnterCriticalSection (&a->r2_ControlSection);
 	a->r2_havesamps += a->r2_insize;
 	LeaveCriticalSection (&a->r2_ControlSection);
@@ -606,7 +621,4 @@ void dexchange (int channel, double* in, double* out)
 		ReleaseSemaphore(a->Sem_OutReady, n, 0);	
 		a->r2_unqueuedsamps -= n * a->out_size;
 	}
-	memcpy (out, a->r1_baseptr + 2 * a->r1_outidx, a->r1_outsize * sizeof (complex));
-	if ((a->r1_outidx += a->r1_outsize) == a->r1_active_buffsize)
-		a->r1_outidx = 0;
 }
