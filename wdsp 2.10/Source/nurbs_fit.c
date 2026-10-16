@@ -1377,12 +1377,20 @@ NF_Curve *nf_fit(NF_WS ws, const NF_Point2 *pts, int n_pts,
             sse += sq(ev.x-pts_work[i].x) + sq(ev.y-pts_work[i].y);
         }
         result.rms = (m_work > 0) ? sqrt(sse/m_work) : 0.0;
+        /* Cross-validation against the final rms: ADVISORY ONLY.  3.1 first made this
+           block live with its fatal branch, and that rejected good fits: the ratio is
+           cv_score / rms, and for a curve the data barely leaves -- the sin curve of a
+           phase-flat amplifier, where rms is a few 1e-4 -- the ratio exceeds 10 on a fit
+           that is fine.  Measured on a two-tone with the feedback 4 samples early
+           (tests/patched.rs a_negative_tx_delay...): 3.0 accepted 9 of 9 fits, 3.1 with
+           the fatal branch 0..8 of 8 depending on which samples the equaliser kept, every
+           rejection binfo 0b0010 on sin.  So the marginal bit is set for the diagnostics
+           and nothing is rejected here; the pre-filter CV check above already flags the
+           same condition the same way (3.1.1). */
         if (n_cv > 0 && result.rms > 0.0) {
             double cv_ratio = result.cv_score / result.rms;
             if (cv_ratio > cfg.cv_overfit_ratio)
                 result.quality |= NF_FIT_CV_MARGINAL;
-            if (cfg.cv_fatal_ratio > 0.0 && cv_ratio > cfg.cv_fatal_ratio)
-                result.quality |= NF_FIT_BAD_OVERFIT;
         }
         if (total_outliers > 0) {
             double sse_out = 0.0;
