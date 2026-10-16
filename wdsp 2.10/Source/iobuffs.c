@@ -584,17 +584,15 @@ void dexchange (int channel, double* in, double* out)
 {
 	int n;
 	IOB a = ch[channel].iob.pd;
-#if defined(_WIN32) || defined(_WIN64)
-	if (!_InterlockedAnd (&ch[channel].run, 1)) _endthread();
-#else
-	// A DSP thread that finds `run` cleared here is between pre_main_destroy clearing
-	// `run` and setting `exec_bypass` (channel.c:108-109). _endthread() ends it holding
-	// csDSP and without the SetEvent(hThreadExit) at the end of wdspmain, which the
-	// close (channel.c:114) then waits on for ever. Returning lets this block run once
-	// more on the buffers it already has and the thread leave through wdspmain's loop.
-	// Gated to non-Windows so the Windows build is unchanged; the race is the same there.
+	/* A DSP thread that finds `run` cleared here is between pre_main_destroy clearing `run`
+	   and setting `exec_bypass` (channel.c:108-109).  The release's _endthread() ended it
+	   holding csDSP and without the SetEvent(hThreadExit) at the end of wdspmain, which the
+	   fork's close (channel.c:114, patch 1) then waited on for ever: measured on Linux as a
+	   hang in CloseChannel with one wdspmain thread alive for two open channels; the window
+	   is the same on Windows, only rarely hit.  Returning lets this block run once more on
+	   the buffers it already has (destroy_main frees nothing until the thread has left) and
+	   the thread leave through wdspmain's loop.  Every platform. */
 	if (!_InterlockedAnd (&ch[channel].run, 1)) return;
-#endif
 
 	EnterCriticalSection (&a->r2_ControlSection);
 	a->r2_havesamps += a->r2_insize;
